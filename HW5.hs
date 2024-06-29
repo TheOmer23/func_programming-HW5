@@ -79,25 +79,58 @@ fmtoList = FoldMapFunc (: []) id
 
 -- Section 2: Deque instances (Don't forget to implement the instances in Deque.hs as well!)
 newtype DequeWrapper a = DequeWrapper (Deque a) deriving (Show, Eq)
-instance Semigroup (DequeWrapper a)
-instance Monoid (DequeWrapper a)
-instance Foldable DequeWrapper
-instance Functor DequeWrapper
-instance Applicative DequeWrapper
-instance Monad DequeWrapper
+instance Semigroup (DequeWrapper a) where
+  DequeWrapper dq1 <> DequeWrapper dq2 = DequeWrapper (dq1 <> dq2)
+
+instance Monoid (DequeWrapper a) where
+  mempty = DequeWrapper DQ.empty
+
+instance Foldable DequeWrapper where
+ foldMap f (DequeWrapper dq) = foldMap f dq
+
+instance Functor DequeWrapper where
+  fmap f (DequeWrapper dq) = DequeWrapper (fmap f dq)
+
+instance Applicative DequeWrapper where
+  pure x = DequeWrapper (pure x)
+  DequeWrapper f <*> DequeWrapper x = DequeWrapper (f <*> x)
+
+instance Monad DequeWrapper where
+  DequeWrapper dq >>= f = DequeWrapper (dq >>= (\x -> case f x of DequeWrapper dq' -> dq')) 
+
 
 -- Section 3: Calculator and traverse
 class Monad f => CalculatorError f where
   divideByZero :: f Int
   missingVariable :: String -> f Int
+ 
 
 runCalculator :: CalculatorError f => Map String Int -> Expr -> f Int
+runCalculator env = eval
+  where
+    eval (Val n) = return n
+    eval (Var x) = case M.lookup x env of
+      Just n  -> return n
+      Nothing -> missingVariable x
+    eval (Add e1 e2) = liftA2 (+) (eval e1) (eval e2)
+    eval (Sub e1 e2) = liftA2 (-) (eval e1) (eval e2)
+    eval (Mul e1 e2) = liftA2 (*) (eval e1) (eval e2)
+    eval (Div e1 e2) = do
+      n1 <- eval e1
+      n2 <- eval e2
+      if n2 == 0
+        then divideByZero
+        else return (n1 `div` n2)
 
 -- Instances to implement:
-instance CalculatorError Maybe
+instance CalculatorError Maybe where
+  divideByZero = Nothing
+  missingVariable _ = Nothing
 
 data Err = DivByZero | MissingVar String deriving (Show, Eq)
-instance CalculatorError (Either Err)
+instance CalculatorError (Either Err) where
+  divideByZero = Left DivByZero
+  missingVariable x = Left (MissingVar x)
 
 data Defaults
   = Defaults
@@ -105,7 +138,9 @@ data Defaults
   { defaultForDivisionByZero :: Int
   , defaultForVariable :: String -> Int
   }
-instance CalculatorError (Reader Defaults)
+instance CalculatorError (Reader Defaults) where
+  divideByZero = Reader $ defaultForDivisionByZero
+  missingVariable x = Reader $ \defaults -> defaultForVariable defaults x
 
 -- From the lectures:
 newtype Reader r a = Reader {runReader :: r -> a}
